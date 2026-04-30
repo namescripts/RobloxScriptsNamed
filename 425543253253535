@@ -1,0 +1,452 @@
+--[[
+    ОПТИМИЗИРОВАННАЯ ВЕРСИЯ
+    - Минимум нагрузка на FPS
+    - Кэширование объектов
+    - Оптимизированные циклы
+    - Умное авто-обновление
+--]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+-- Кэш для хранения хитбоксов (чтобы не искать каждый раз)
+local hitboxCache = {}
+local lastUpdateTime = 0
+local updateInterval = 3 -- секунды
+
+-- Переменные
+local autoModifyEnabled = false
+local selectedMode = "all"
+local selectedHitbox = nil
+local selectedCharacterName = ""
+
+-- Оптимизированное получение всех хитбоксов (с кэшем)
+local function getAllHitboxes()
+    local currentTime = tick()
+    
+    -- Обновляем кэш только раз в 3 секунды (или при принудительном обновлении)
+    if currentTime - lastUpdateTime < updateInterval and next(hitboxCache) then
+        return hitboxCache
+    end
+    
+    lastUpdateTime = currentTime
+    
+    -- Очищаем старый кэш
+    for character, _ in pairs(hitboxCache) do
+        if not character or not character.Parent then
+            hitboxCache[character] = nil
+        end
+    end
+    
+    -- Поиск новых хитбоксов
+    for _, otherPlayer in ipairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character and otherPlayer.Character.Parent then
+            local character = otherPlayer.Character
+            if not hitboxCache[character] then
+                local hitbox = character:FindFirstChild("HeadHitbox")
+                if not hitbox then
+                    local head = character:FindFirstChild("Head")
+                    if head then
+                        hitbox = head:FindFirstChild("HeadHitbox")
+                    end
+                end
+                if hitbox and hitbox:IsA("BasePart") then
+                    hitboxCache[character] = hitbox
+                end
+            end
+        end
+    end
+    
+    return hitboxCache
+end
+
+-- Применение ко всем (оптимизированное)
+local function applyToAllPlayers(sizeValue, transparencyValue)
+    local hitboxes = getAllHitboxes()
+    local count = 0
+    
+    for _, hitbox in pairs(hitboxes) do
+        if hitbox and hitbox.Parent then
+            hitbox.Size = sizeValue
+            hitbox.Transparency = transparencyValue
+            count = count + 1
+        end
+    end
+    
+    if count > 0 then
+        -- Не печатаем в консоль при авто-режиме (снижаем нагрузку)
+        if not autoModifyEnabled then
+            print(string.format("✅ Применено к %d игрокам", count))
+        end
+    end
+    
+    return count
+end
+
+-- Создание GUI (оптимизированный, без лишних элементов)
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HitboxEditor"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 280, 0, 320)
+mainFrame.Position = UDim2.new(0.5, -140, 0.5, -160)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.BackgroundTransparency = 0.05
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true -- Встроенный Drag вместо самодельного
+mainFrame.Parent = screenGui
+
+local corners = Instance.new("UICorner")
+corners.CornerRadius = UDim.new(0, 10)
+corners.Parent = mainFrame
+
+-- Заголовок
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 35)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "⚙ HeadHitbox Editor"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 14
+titleLabel.Parent = mainFrame
+
+-- Режимы
+local modeLabel = Instance.new("TextLabel")
+modeLabel.Size = UDim2.new(0.9, 0, 0, 20)
+modeLabel.Position = UDim2.new(0.05, 0, 0, 40)
+modeLabel.BackgroundTransparency = 1
+modeLabel.Text = "Режим:"
+modeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+modeLabel.TextXAlignment = Enum.TextXAlignment.Left
+modeLabel.Font = Enum.Font.Gotham
+modeLabel.TextSize = 12
+modeLabel.Parent = mainFrame
+
+local allBtn = Instance.new("TextButton")
+allBtn.Size = UDim2.new(0.4, 0, 0, 28)
+allBtn.Position = UDim2.new(0.05, 0, 0, 62)
+allBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+allBtn.Text = "👥 Всем"
+allBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+allBtn.Font = Enum.Font.GothamBold
+allBtn.TextSize = 12
+allBtn.Parent = mainFrame
+
+local singleBtn = Instance.new("TextButton")
+singleBtn.Size = UDim2.new(0.4, 0, 0, 28)
+singleBtn.Position = UDim2.new(0.55, 0, 0, 62)
+singleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+singleBtn.Text = "🎯 Один"
+singleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+singleBtn.Font = Enum.Font.GothamBold
+singleBtn.TextSize = 12
+singleBtn.Parent = mainFrame
+
+local btnCorner1 = Instance.new("UICorner")
+btnCorner1.CornerRadius = UDim.new(0, 6)
+btnCorner1.Parent = allBtn
+
+local btnCorner2 = Instance.new("UICorner")
+btnCorner2.CornerRadius = UDim.new(0, 6)
+btnCorner2.Parent = singleBtn
+
+-- Список игроков
+local playerList = Instance.new("ScrollingFrame")
+playerList.Size = UDim2.new(0.9, 0, 0, 80)
+playerList.Position = UDim2.new(0.05, 0, 0, 98)
+playerList.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+playerList.BackgroundTransparency = 0.2
+playerList.BorderSizePixel = 0
+playerList.Visible = false
+playerList.ScrollBarThickness = 6
+playerList.Parent = mainFrame
+
+local listCorner = Instance.new("UICorner")
+listCorner.CornerRadius = UDim.new(0, 6)
+listCorner.Parent = playerList
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 4)
+listLayout.Parent = playerList
+
+-- Выбранная цель
+local selectedLabel = Instance.new("TextLabel")
+selectedLabel.Size = UDim2.new(0.9, 0, 0, 18)
+selectedLabel.Position = UDim2.new(0.05, 0, 0, 185)
+selectedLabel.BackgroundTransparency = 1
+selectedLabel.Text = "Режим: всем игрокам"
+selectedLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
+selectedLabel.Font = Enum.Font.Gotham
+selectedLabel.TextSize = 11
+selectedLabel.Parent = mainFrame
+
+-- Размер
+local sizeLabel = Instance.new("TextLabel")
+sizeLabel.Size = UDim2.new(0.4, 0, 0, 18)
+sizeLabel.Position = UDim2.new(0.05, 0, 0, 210)
+sizeLabel.BackgroundTransparency = 1
+sizeLabel.Text = "Размер:"
+sizeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+sizeLabel.TextXAlignment = Enum.TextXAlignment.Left
+sizeLabel.Font = Enum.Font.Gotham
+sizeLabel.TextSize = 12
+sizeLabel.Parent = mainFrame
+
+local sizeX = Instance.new("TextBox")
+sizeX.Size = UDim2.new(0.25, 0, 0, 25)
+sizeX.Position = UDim2.new(0.05, 0, 0, 230)
+sizeX.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+sizeX.TextColor3 = Color3.fromRGB(255, 255, 255)
+sizeX.Text = "2"
+sizeX.Font = Enum.Font.Gotham
+sizeX.TextSize = 12
+sizeX.Parent = mainFrame
+
+local sizeY = Instance.new("TextBox")
+sizeY.Size = UDim2.new(0.25, 0, 0, 25)
+sizeY.Position = UDim2.new(0.35, 0, 0, 230)
+sizeY.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+sizeY.TextColor3 = Color3.fromRGB(255, 255, 255)
+sizeY.Text = "2"
+sizeY.Font = Enum.Font.Gotham
+sizeY.TextSize = 12
+sizeY.Parent = mainFrame
+
+local sizeZ = Instance.new("TextBox")
+sizeZ.Size = UDim2.new(0.25, 0, 0, 25)
+sizeZ.Position = UDim2.new(0.65, 0, 0, 230)
+sizeZ.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+sizeZ.TextColor3 = Color3.fromRGB(255, 255, 255)
+sizeZ.Text = "2"
+sizeZ.Font = Enum.Font.Gotham
+sizeZ.TextSize = 12
+sizeZ.Parent = mainFrame
+
+-- Прозрачность
+local transLabel = Instance.new("TextLabel")
+transLabel.Size = UDim2.new(0.5, 0, 0, 18)
+transLabel.Position = UDim2.new(0.05, 0, 0, 262)
+transLabel.BackgroundTransparency = 1
+transLabel.Text = "Прозрачность:"
+transLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+transLabel.TextXAlignment = Enum.TextXAlignment.Left
+transLabel.Font = Enum.Font.Gotham
+transLabel.TextSize = 12
+transLabel.Parent = mainFrame
+
+local transInput = Instance.new("TextBox")
+transInput.Size = UDim2.new(0.4, 0, 0, 25)
+transInput.Position = UDim2.new(0.55, 0, 0, 260)
+transInput.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+transInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+transInput.Text = "0.5"
+transInput.Font = Enum.Font.Gotham
+transInput.TextSize = 12
+transInput.Parent = mainFrame
+
+-- Авто-режим
+local autoBtn = Instance.new("TextButton")
+autoBtn.Size = UDim2.new(0.4, 0, 0, 28)
+autoBtn.Position = UDim2.new(0.05, 0, 0, 290)
+autoBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
+autoBtn.Text = "⏹ Авто ВЫКЛ"
+autoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoBtn.Font = Enum.Font.GothamBold
+autoBtn.TextSize = 11
+autoBtn.Parent = mainFrame
+
+local applyBtn = Instance.new("TextButton")
+applyBtn.Size = UDim2.new(0.4, 0, 0, 28)
+applyBtn.Position = UDim2.new(0.55, 0, 0, 290)
+applyBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 200)
+applyBtn.Text = "💾 Применить"
+applyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+applyBtn.Font = Enum.Font.GothamBold
+applyBtn.TextSize = 12
+applyBtn.Parent = mainFrame
+
+local btnCorner3 = Instance.new("UICorner")
+btnCorner3.CornerRadius = UDim.new(0, 6)
+btnCorner3.Parent = autoBtn
+
+local btnCorner4 = Instance.new("UICorner")
+btnCorner4.CornerRadius = UDim.new(0, 6)
+btnCorner4.Parent = applyBtn
+
+-- Закрытие
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Position = UDim2.new(1, -32, 0, 4)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.Parent = mainFrame
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(1, 0)
+closeCorner.Parent = closeBtn
+
+-- Оптимизированное обновление списка
+local function updatePlayerList()
+    for _, child in ipairs(playerList:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    local hitboxes = getAllHitboxes()
+    local yOffset = 0
+    
+    for character, hitbox in pairs(hitboxes) do
+        if character and character.Parent then
+            local name = character.Name
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid and humanoid.DisplayName then
+                name = humanoid.DisplayName
+            end
+            
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, -10, 0, 28)
+            btn.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
+            btn.Text = name
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.Font = Enum.Font.Gotham
+            btn.TextSize = 11
+            btn.BackgroundTransparency = 0.3
+            btn.Parent = playerList
+            
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0, 4)
+            btnCorner.Parent = btn
+            
+            btn.MouseButton1Click:Connect(function()
+                selectedHitbox = hitbox
+                selectedCharacterName = name
+                selectedLabel.Text = "🎯 Цель: " .. name
+                selectedLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+                
+                sizeX.Text = string.format("%.1f", hitbox.Size.X)
+                sizeY.Text = string.format("%.1f", hitbox.Size.Y)
+                sizeZ.Text = string.format("%.1f", hitbox.Size.Z)
+                transInput.Text = string.format("%.2f", hitbox.Transparency)
+            end)
+        end
+    end
+    
+    if not next(hitboxes) then
+        local emptyLabel = Instance.new("TextLabel")
+        emptyLabel.Size = UDim2.new(1, -10, 0, 28)
+        emptyLabel.BackgroundTransparency = 1
+        emptyLabel.Text = "Нет игроков"
+        emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+        emptyLabel.Font = Enum.Font.Gotham
+        emptyLabel.TextSize = 11
+        emptyLabel.Parent = playerList
+    end
+end
+
+-- Применение изменений
+local function applyChanges()
+    local newX = tonumber(sizeX.Text)
+    local newY = tonumber(sizeY.Text)
+    local newZ = tonumber(sizeZ.Text)
+    local newTrans = tonumber(transInput.Text)
+    
+    if not (newX and newY and newZ and newX > 0 and newY > 0 and newZ > 0) then
+        return
+    end
+    
+    if not (newTrans and newTrans >= 0 and newTrans <= 1) then
+        return
+    end
+    
+    local newSize = Vector3.new(newX, newY, newZ)
+    
+    if selectedMode == "all" then
+        applyToAllPlayers(newSize, newTrans)
+    elseif selectedMode == "single" and selectedHitbox and selectedHitbox.Parent then
+        selectedHitbox.Size = newSize
+        selectedHitbox.Transparency = newTrans
+    end
+end
+
+-- Авто-изменение (оптимизированное)
+local autoConnection = nil
+local function toggleAutoModify()
+    autoModifyEnabled = not autoModifyEnabled
+    
+    if autoModifyEnabled then
+        if autoConnection then
+            autoConnection:Disconnect()
+        end
+        
+        autoBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+        autoBtn.Text = "▶ Авто ВКЛ"
+        
+        -- Используем task.wait вместо RunService для меньшей нагрузки
+        autoConnection = task.spawn(function()
+            while autoModifyEnabled do
+                task.wait(3) -- Ждём 3 секунды
+                if autoModifyEnabled then
+                    applyChanges()
+                end
+            end
+        end)
+    else
+        if autoConnection then
+            task.cancel(autoConnection)
+            autoConnection = nil
+        end
+        autoBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
+        autoBtn.Text = "⏹ Авто ВЫКЛ"
+    end
+end
+
+-- Обработчики
+allBtn.MouseButton1Click:Connect(function()
+    selectedMode = "all"
+    allBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+    singleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    playerList.Visible = false
+    selectedLabel.Text = "👥 Режим: всем игрокам"
+    selectedLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+end)
+
+singleBtn.MouseButton1Click:Connect(function()
+    selectedMode = "single"
+    singleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+    allBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    playerList.Visible = true
+    updatePlayerList()
+    selectedLabel.Text = "🎯 Выберите цель из списка"
+    selectedLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+end)
+
+autoBtn.MouseButton1Click:Connect(toggleAutoModify)
+applyBtn.MouseButton1Click:Connect(applyChanges)
+closeBtn.MouseButton1Click:Connect(function()
+    if autoConnection then
+        task.cancel(autoConnection)
+    end
+    screenGui:Destroy()
+end)
+
+-- Обновляем кэш раз в 5 секунд (фоном, без нагрузки)
+task.spawn(function()
+    while screenGui.Parent do
+        task.wait(5)
+        if not autoModifyEnabled then -- Только если не в авто-режиме
+            getAllHitboxes() -- Обновляем кэш
+        end
+    end
+end)
+
+print("✅ HeadHitbox Editor загружен (оптимизированная версия)")
